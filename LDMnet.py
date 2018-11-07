@@ -80,7 +80,7 @@ class LDMnet(NNClassifier):
             X_X = X
         loss = super().get_loss(y_pred, y_true, X_X, training)
         if X is not None and self.alpha is not None:
-            ksi = to_tensor(X['ksi'], device=self.device).to(X_X.dtype)
+            ksi = self.infer(X, name=self.layer_name)
             alpha = to_tensor(X['alpha'], device=self.device).to(X_X.dtype)
             Z = to_tensor(X['Z'], device=self.device).to(X_X.dtype)
             reg_loss = self.mu * 0.5 * torch.norm(alpha - ksi + Z)

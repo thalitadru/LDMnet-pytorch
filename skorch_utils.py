@@ -29,6 +29,65 @@ from collections import defaultdict
 import matplotlib.pyplot as plt
 
 
+class StopperNet(object):
+    """
+    StopperNet.
+
+    This class captures the keyboardInterrupt exception during the training
+    loop, setting the attribute stop to true.
+    Any model that needs to run fit() by mutiple calls to partial_fit() can use
+    this class to know when this exception has been raised and stop training.
+    Normal skorch behavior is to capture the exception and do nothing.
+    """
+
+    def initialize(self):
+        super().initialize()
+        self.stop = False
+
+    def partial_fit(self, X, y=None, classes=None, **fit_params):
+        """Fit the module.
+
+        If the module is initialized, it is not re-initialized, which
+        means that this method should be used if you want to continue
+        training a model (warm start).
+
+        Parameters
+        ----------
+        X : input data, compatible with skorch.dataset.Dataset
+          By default, you should be able to pass:
+
+            * numpy arrays
+            * torch tensors
+            * pandas DataFrame or Series
+            * a dictionary of the former three
+            * a list/tuple of the former three
+
+          If this doesn't work with your data, you have to pass a
+          ``Dataset`` that can deal with the data.
+
+        y : target data, compatible with skorch.dataset.Dataset
+          The same data types as for ``X`` are supported.
+
+        classes : array, sahpe (n_classes,)
+          Solely for sklearn compatibility, currently unused.
+
+        **fit_params : dict
+          Additional parameters passed to the ``forward`` method of
+          the module and to the train_split call.
+
+        """
+        if not self.initialized_:
+            self.initialize()
+
+        self.notify('on_train_begin', X=X, y=y)
+        try:
+            self.fit_loop(X, y, **fit_params)
+        except KeyboardInterrupt:
+            self.stop = True
+        self.notify('on_train_end', X=X, y=y)
+        return self
+
+
 class TransformerNet(TransformerMixin):
     def initialize(self):
         if not self.initialized_:

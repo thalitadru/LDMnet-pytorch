@@ -12,7 +12,7 @@ ldmnet with skorch callback
 import numpy as np
 
 from scipy import sparse
-from skorch_utils import NNClassifier
+from skorch_utils import NNClassifier, StopperNet
 from skorch.utils import to_tensor
 from skorch.callbacks import Callback
 import torch
@@ -20,25 +20,26 @@ import torch
 from laplacian_utils import compute_W, compute_L
 
 
-class LDMnet(NNClassifier):
-    def __init__(self, module,
+class LDMnet(StopperNet, NNClassifier):
+    def __init__(self,
+                 module,
                  layer_name,
                  mu=0.1,
                  epochs_update=2,
+                 lambda_bar=0.01,
+                 criterion=torch.nn.CrossEntropyLoss,
                  **kwargs):
-        super().__init__(module=module, **kwargs)
+        super().__init__(module, criterion=criterion, **kwargs)
         self.layer_name = layer_name
         self.epochs_update = epochs_update
-        if 'callbacks__AlphaUpdate__mu' in kwargs:
-            self.mu = kwargs['callbacks__AlphaUpdate__mu']
-        else:
-            self.mu = mu
+        self.mu = mu
+        self.lambda_bar = lambda_bar
 
-    @property
-    def _default_callbacks(self):
-        return super()._default_callbacks + \
-            [('AlphaUpdate', AlphaUpdate(layer_name=self.layer_name,
-                                         mu=self.mu))]
+    def initialize_callbacks(self):
+        self.callbacks += [AlphaUpdate(layer_name=self.layer_name,
+                                       lambda_bar=self.lambda_bar,
+                                       mu=self.mu)]
+        super().initialize_callbacks()
 
     def initialize(self):
         super().initialize()
@@ -128,8 +129,10 @@ class AlphaUpdate(Callback):
         else:
             X_imgs = None
         X = X['X']
-        # compute W, L and solve linsys to update alpha
-        self._update_alpha(net, X, X_imgs=X_imgs)
+        if self.lambda_bar != 0:
+            # compute W, L and solve linsys to update alpha
+            self._update_W_L(net.ksi, X, X_imgs, y=y)
+            self._update_alpha(net)
 
     def on_train_end(self, net, X, y=None, **kwargs):
         net.ksi[...] = net.transform(X)
@@ -167,30 +170,31 @@ class AlphaUpdate(Callback):
         self.solver_info_.append(info)
         return x
 
-    def _update_alpha(self, net, X, X_imgs=None):
+    def _cat_ksi(self, ksi,  X, X_imgs=None):
         '''
         X : samples (images or features)
         X_imgs : input images (in case X contains pre-extracted features)
         '''
-
         if self.concatenate_input:
             input = X if X_imgs is None else X_imgs
-            input = input.view(input.shape[0], -1)
-            p = lambda ksi: np.concatenate([ksi, input], axis=-1)
+            return np.concatenate([ksi, input], axis=-1)
         else:
-            p = lambda ksi: ksi
+            return ksi
 
-        self.W_ = compute_W(p(net.ksi), self.n_neighbors,
-                            nn_radius=10)
+    def _update_W_L(self, ksi, X, X_imgs=None, y=None):
+        cat_ksi = self._cat_ksi(ksi, X, X_imgs=X_imgs)
+        self.W_ = compute_W(cat_ksi,
+                            n_neighbors=self.n_neighbors,
+                            nn_radius=10, y=y)
         self.L_ = compute_L(self.W_)
 
+    def _update_alpha(self, net):
         n_features = net.ksi.shape[1]
 
         for j in range(n_features):
             alphaj = self._solve_lin_sys(self.W_, self.L_,
-                                         net.ksi[:,j], net.Z[:,j])
-            net.alpha[:,j] = alphaj
-
+                                         net.ksi[:, j], net.Z[:, j])
+            net.alpha[:, j] = alphaj
 
 
 class SaveVars(Callback):
@@ -213,9 +217,9 @@ class SaveVars(Callback):
         """
         epochs = len(net.history)
         if epochs - self.last_save >= self.every_n_epochs:
-            self.ksi.append(net.ksi)
-            self.Z.append(net.Z)
-            self.alpha.append(net.alpha)
+            self.ksi.append(net.ksi.copy())
+            self.Z.append(net.Z.copy())
+            self.alpha.append(net.alpha.copy())
             self.last_save = epochs
             self.epochs.append(epochs - 1)
 

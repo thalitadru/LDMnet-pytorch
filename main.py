@@ -44,7 +44,7 @@ def base_config():
     # pylint: disable=unused-variable
     seed = 15646842
     batch_size = 100
-    max_epochs = 10#500
+    max_epochs = 500
     weight_decay = 0.0
     dataset = 'mnist'
     layer_name = 'conv3'
@@ -52,12 +52,11 @@ def base_config():
     mu = 0.001
     lambda_bar = 0.01
     train_size = 500
-    device = 'cuda' # cpu or cuda
+    device = 'cpu' # cpu or cuda
     dropout = 0.0
     epochs_update=2
     optimizer = dict(weight_decay=weight_decay, momentum=0.9)
     alphaupdate = dict(
-        lambda_bar=lambda_bar,
         n_neighbors=20,
         tol=1e-5,
         max_iter=50,
@@ -163,8 +162,8 @@ def get_module(dataset):
 
 
 @ex.capture
-def train(_run, layer_name, lr, mu, batch_size, device, max_epochs,
-          epochs_update,
+def train(_run, layer_name, lr, mu, lambda_bar, batch_size, device,
+          max_epochs, epochs_update,
           alphaupdate, optimizer):
     module = get_module()
     X, y = get_dataset()
@@ -179,6 +178,7 @@ def train(_run, layer_name, lr, mu, batch_size, device, max_epochs,
                  criterion=torch.nn.CrossEntropyLoss,
                  layer_name=layer_name,
                  mu=mu,
+                 lambda_bar=lambda_bar,
                  lr=lr,
                  epochs_update=epochs_update,
                  max_epochs=max_epochs,

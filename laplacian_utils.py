@@ -13,9 +13,9 @@ import networkx as nx
 import matplotlib.pyplot as plt
 
 
-def compute_W(X, n_neighbors=10, nn_radius='halfk'):
+def knn_distance_matrix(X, n_neighbors=10, nn_radius='halfk', leaf_size=30):
     knn = NearestNeighbors(n_neighbors, algorithm='auto', metric='sqeuclidean',
-                           leaf_size=30, n_jobs=-1)
+                           leaf_size=leaf_size, n_jobs=-1)
     knn.fit(X)
     W = knn.kneighbors_graph(n_neighbors=n_neighbors, mode='distance')
 
@@ -23,20 +23,39 @@ def compute_W(X, n_neighbors=10, nn_radius='halfk'):
         nn_radius = n_neighbors//2
 
     distances, _ = knn.kneighbors(n_neighbors=nn_radius)
-    nn_radius_distance = np.sqrt(distances[:,-1].squeeze())
+    half_k_neighbors_distance = np.sqrt(distances[:, -1].squeeze())
     # normalization based on each points "neighbohood radius"
     for i in range(W.shape[0]):
-        W[i,:] /= nn_radius_distance[i]
+        W[i,:] /= half_k_neighbors_distance[i]
     W = W.tocsc()
     for j in range(W.shape[0]):
-         W[:,j] /= nn_radius_distance[i]
+         W[:,j] /= half_k_neighbors_distance[i]
 
+    return W
+
+def compute_W(X, n_neighbors=10, nn_radius='halfk', leaf_size=30, y=None):
+    if y is None:
+        W = knn_distance_matrix(X, n_neighbors=n_neighbors,
+                                nn_radius=nn_radius,
+                                leaf_size=leaf_size)
+    else:
+        classes = set(y)
+        W = sp.lil_matrix((X.shape[0],X.shape[0]))
+        for class_id in classes:
+            idx = np.where(y==class_id)[0]
+            class_W = knn_distance_matrix(X[idx], n_neighbors=n_neighbors,
+                                          nn_radius=nn_radius,
+                                          leaf_size=leaf_size)
+            for j, i in enumerate(idx):
+                W[idx,i] = class_W[:,j]
+        W = W.tocsc()
     # comput exp over non zero entries (zero entries are distances non calculated)
     W *= -1
     W = W.expm1()
     W[W.nonzero()] += 1 # operation modifies W in place
     W.eliminate_zeros()
     return W
+
 
 def ckech_connectivity(W):
     return nx.algorithms.is_connected(nx.from_scipy_sparse_matrix(W))
